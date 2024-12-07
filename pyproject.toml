@@ -1,0 +1,14 @@
+[project]
+name = "neteasecrawler"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.1.7",
+    "drissionpage>=4.1.0.12",
+    "httpx>=0.28.0",
+    "music-tag>=0.4.3",
+    "paramiko>=3.5.0",
+    "pyncm>=1.7.1",
+]
