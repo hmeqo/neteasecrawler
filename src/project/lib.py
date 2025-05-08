@@ -12,7 +12,7 @@ import music_tag
 from DrissionPage import Chromium
 from pyncm import apis
 
-BASE_DIR = Path(__file__).parent.parent / "neteasecloudmusic"
+BASE_DIR = Path(__file__).parent.parent.parent / "neteasecloudmusic"
 INFOS_DIR = BASE_DIR / "infos"
 LYRICS_DIR = BASE_DIR / "lyrics"
 MUSICS_DIR = BASE_DIR / "musics"
@@ -28,7 +28,7 @@ MUSICS_DB_FILE = BASE_DIR / "musics.json"
 PLAYLISTS_DB_FILE = BASE_DIR / "playlists.json"
 USERS_DB_FILE = BASE_DIR / "users.json"
 
-api_deplay = 0.1
+api_delay = 0.1
 
 
 @dataclass
@@ -70,6 +70,7 @@ class Music:
     version: int = 0
     songJumpInfo: Any | None = None
     entertainmentTags: Any | None = None
+    displayTags: Any | None = None
     awardTags: Any | None = None
     single: int = 0
     noCopyrightRcmd: Any | None = None
@@ -103,8 +104,8 @@ class Music:
     def get_dist_name(self):
         return f"{self.id}.mp3"
 
-    def get_dist_path(self, playlist_id: int | str):
-        return DIST_DIR / f"{playlist_id}" / self.get_dist_name()
+    def get_dist_path(self, dirname: int | str):
+        return DIST_DIR / f"{dirname}" / self.get_dist_name()
 
     def get_download_name(self):
         return f"{self.id}.mp3"
@@ -174,7 +175,7 @@ class Crawler:
         if not update and music:
             return True, music
         details: dict = apis.track.GetTrackDetail([music_id])  # type: ignore
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
         if not details.get("code", 0) == 200:
             return False, details
         details = details["songs"][0]
@@ -187,7 +188,7 @@ class Crawler:
         """获取歌词"""
         lyrics_file = LYRICS_DIR / f"{music_id}.json"
         lyrics: dict = apis.track.GetTrackLyricsNew(music_id)  # type: ignore
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
         if not lyrics.get("code", 0) == 200:
             return False, lyrics
         lyrics_file.write_text(json.dumps(lyrics, indent=4, ensure_ascii=False))
@@ -200,13 +201,13 @@ class Crawler:
             raise Exception("Login failed.")
         return crawler
 
-    def download(self, music_id: int):
+    def _download(self, music_id: int):
         """下载歌曲"""
         info_file = INFOS_DIR / f"{music_id}.json"
         music_file = MUSICS_DIR / f"{music_id}.mp3"
 
         info: dict = apis.track.GetTrackAudioV1([music_id])  # type: ignore
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
         if not info.get("code", 0) == 200:
             return False, info
         info = info["data"][0]
@@ -254,14 +255,25 @@ class Crawler:
         print("Login success.")
         cookies = dict((i["name"], i["value"]) for i in self.tab.cookies())
         apis.login.LoginViaCookie(cookies["MUSIC_U"])
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
         return True
+
+    def download_music(self, music_id: int):
+        print("Downloading:", music_id)
+        status, music_info = self._download(music_id)
+        if status is True:
+            print("Downloaded.")
+        elif status is False:
+            print(music_info)
+            print("Failed.")
+        elif status is None:
+            print("Already downloaded.")
 
     def pull_playlist(self, playlist_id: int, download=False, update_details=False):
         """获取歌单信息, 指定参数可下载"""
         # self.tab.get(f"https://music.163.com/#/my/m/music/playlist?id={playlist_id}")
         info: dict = apis.playlist.GetPlaylistInfo(playlist_id)["playlist"]  # type: ignore
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
 
         # playlist_name: str = self.tab.ele("xpath=//h2[@class='f-ff2 f-thide']").text  # type: ignore
         playlist_name = info["name"]
@@ -271,7 +283,7 @@ class Crawler:
             (i["id"], i["name"])
             for i in apis.playlist.GetPlaylistAllTracks(playlist_id)["songs"]  # type: ignore
         ]
-        time.sleep(api_deplay)
+        time.sleep(api_delay)
 
         playlist = Playlist(
             id=playlist_id,
@@ -292,15 +304,7 @@ class Crawler:
                 print("Failed.")
 
             if download:
-                print("Downloading:", music_id)
-                status, music_info = self.download(music_id)
-                if status is True:
-                    print("Downloaded.")
-                elif status is False:
-                    print(music_info)
-                    print("Failed.")
-                elif status is None:
-                    print("Already downloaded.")
+                self.download_music(music_id)
         return playlist
 
     def pull_all_playlist(self, download=False, update_details=False):
@@ -330,13 +334,18 @@ class Crawler:
 def build_playlist(playlist_id: int, pull_lyrics=False, update_lyrics=False, update_artwork=False):
     """从歌单生成mp3文件 (包含专辑封面等信息)"""
     musics = [db.musics[str(i)] for i in set(db.playlists[str(playlist_id)].music_ids)]
+    build_musics(
+        musics, playlist_id, pull_lyrics=pull_lyrics, update_lyrics=update_lyrics, update_artwork=update_artwork
+    )
 
+
+def build_musics(musics: list[Music], dirname: int | str, pull_lyrics=False, update_lyrics=False, update_artwork=False):
     for music in musics:
         music_fp = music.get_download_path()
         if not music_fp.exists():
             warnings.warn(f"Music {music_fp.name} not found.")
             continue
-        dist_fp = music.get_dist_path(playlist_id)
+        dist_fp = music.get_dist_path(dirname)
         dist_fp.parent.mkdir(parents=True, exist_ok=True)
 
         print(f"Building: {music.id} -> {dist_fp.relative_to(BASE_DIR)} ...", end="\t")
@@ -353,13 +362,13 @@ def build_playlist(playlist_id: int, pull_lyrics=False, update_lyrics=False, upd
         f["year"] = music.year
         if pull_lyrics and (update_lyrics or not f["lyrics"]):
             status, lyrics = Crawler.get_lyrics(music.id)
-            time.sleep(api_deplay)
+            time.sleep(api_delay)
             if not status:
                 raise Exception(f"Failed to get lyrics for {music.name}.")
             f["lyrics"] = lyrics["lrc"]["lyric"]
         if update_artwork or not f["artwork"]:
             response = httpx.get(music.album_pic_url)
-            time.sleep(api_deplay)
+            time.sleep(api_delay)
             if not response.is_success:
                 raise Exception(f"Failed to get album cover for {music.name}.")
             f["artwork"] = response.content
@@ -367,13 +376,13 @@ def build_playlist(playlist_id: int, pull_lyrics=False, update_lyrics=False, upd
         print("Done.")
         f.save()
 
-    for i in set((DIST_DIR / f"{playlist_id}").iterdir()).difference(i.get_dist_path(playlist_id) for i in musics):
+    for i in set((DIST_DIR / f"{dirname}").iterdir()).difference(m.get_dist_path(dirname) for m in musics):
         print(f"Removing: {i.relative_to(BASE_DIR)} ...")
         i.unlink()
         print("Done.")
 
 
-def search_playlist(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
+def find_playlist(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
     """本地查询, 搜索歌单"""
     p_id = None if id is None else str(id)
     for playlist_id, playlist in db.playlists.items():
@@ -384,7 +393,7 @@ def search_playlist(*, id: int | None = None, name: str | None = None, fuzzy: bo
             yield int(playlist_id), playlist.name
 
 
-def search_music(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
+def find_music(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
     """本地查询, 搜索歌曲"""
     m_id = None if id is None else str(id)
     for music_id, music in db.musics.items():
@@ -399,9 +408,9 @@ def search_music(*, id: int | None = None, name: str | None = None, fuzzy: bool 
             yield int(music_id), music.get_std_name()
 
 
-def search_music_in_playlists(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
+def find_music_in_playlists(*, id: int | None = None, name: str | None = None, fuzzy: bool = False):
     """查询一首歌存在于哪些歌单"""
-    musics = search_music(name=name, fuzzy=fuzzy)
+    musics = find_music(name=name, fuzzy=fuzzy)
     music_ids = {id} if name is None else {i[0] for i in musics}
     for playlist_id, playlist in db.playlists.items():
         ids = music_ids.intersection(playlist.music_ids)

@@ -27,5 +27,9 @@ uv sync --forzen
 ## 运行 cli
 
 ```sh
-uv run python neteasecrawler.py
+uv run neteasecrawler
 ```
+
+## 计划
+
+- [ ] 制作 GUI

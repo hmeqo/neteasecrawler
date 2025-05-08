@@ -2,6 +2,7 @@ from getpass import getpass
 
 import click
 
+from . import lib
 from .azuracast import *
 from .lib import *
 
@@ -14,10 +15,9 @@ def try_index(lst: list, value):
 
 
 @click.group()
-@click.option("--api-delay", help="API delay", default=0.1, type=float)
+@click.option("--api-delay", help="API delay", default=0.0, type=float)
 def cli(api_delay: float):
-    global api_deplay
-    api_deplay = api_delay
+    lib.api_deplay = api_delay
 
 
 def music():
@@ -35,22 +35,25 @@ def music():
     @click.option("--id", help="Music id to search for.", type=int)
     @click.option("--name", help="Music name to search for.")
     @click.option("--fuzzy", help="Fuzzy search.", is_flag=True)
-    def search(id: int | None, name: str | None, fuzzy: bool):
+    @click.option("--download", help="Download music.", is_flag=True)
+    def find(id: int | None, name: str | None, fuzzy: bool, download: bool):
         """Search musics by id or name."""
         if id is None and name is None:
             raise click.UsageError("id or name must be specified")
-        for music_id, music_name in search_music(id=id, name=name, fuzzy=fuzzy):
+        for music_id, music_name in find_music(id=id, name=name, fuzzy=fuzzy):
             print(f"{music_id} - {music_name}")
+            if download:
+                Crawler.open().download_music(music_id)
 
     @music.command()
     @click.option("--id", help="Music id to search in playlist.", type=int)
     @click.option("--name", help="Music name to search in playlist.")
     @click.option("--fuzzy", help="Fuzzy search.", is_flag=True)
-    def search_in_playlists(id: int | None, name: str | None, fuzzy: bool):
-        """Search musics in playlist by id or name."""
+    def find_in_playlists(id: int | None, name: str | None, fuzzy: bool):
+        """Find musics in playlist by id or name."""
         if id is None and name is None:
             raise click.UsageError("id or name must be specified")
-        for p_id, p_name, m_id, m_name in search_music_in_playlists(id=id, name=name, fuzzy=fuzzy):
+        for p_id, p_name, m_id, m_name in find_music_in_playlists(id=id, name=name, fuzzy=fuzzy):
             print(f"music: {m_id} - {m_name}")
             print(f"  playlist: {p_id} - {p_name}")
 
@@ -90,41 +93,62 @@ def playlist():
             return
         if id is None and name is None:
             raise click.UsageError("id or name must be specified")
-        for playlist_id, _ in search_playlist(id=id, name=name, fuzzy=fuzzy):
+        for playlist_id, _ in find_playlist(id=id, name=name, fuzzy=fuzzy):
             Crawler.open().pull_playlist(playlist_id, download=download)
 
     @playlist.command()
     @click.option("--id", help="Playlist id to search for.", type=int)
     @click.option("--name", help="Playlist name to search for.")
     @click.option("--fuzzy", help="Fuzzy search.", is_flag=True)
-    def search(id: int | None, name: str | None, fuzzy: bool):
-        """Search playlists by id or name."""
+    def find(id: int | None, name: str | None, fuzzy: bool):
+        """Find playlists by id or name."""
         if id is None and name is None:
             raise click.UsageError("id or name must be specified")
-        for playlist_id, playlist_name in search_playlist(id=id, name=name, fuzzy=fuzzy):
+        for playlist_id, playlist_name in find_playlist(id=id, name=name, fuzzy=fuzzy):
             print(f"{playlist_id} - {playlist_name}")
 
-    @playlist.command()
+
+def build():
+    @cli.group()
+    def build():
+        pass
+
+    @build.command()
+    @click.option("--sort-by", help="Sort playlist by userid.")
+    def list(sort_by: str | None):
+        """List all builded playlists."""
+        dist_playlists = DIST_DIR.iterdir()
+        if sort_by is not None:
+            user_playlists = db.users.get(sort_by, User()).playlists
+            dist_playlists = sorted(dist_playlists, key=lambda fp: try_index(user_playlists, int(fp.stem)))
+        dist_playlists = [i for i in dist_playlists]
+        for fp in dist_playlists:
+            print(f"{fp.relative_to(BASE_DIR)} - {db.playlists[fp.stem].name if fp.stem in db.playlists else '?'}")
+        return
+
+    @build.command()
     @click.option("--id", help="Playlist id to search for and build.", type=int)
     @click.option("--name", help="Playlist name to search for and build.")
-    @click.option("--list-builded", help="List all builded playlists.", is_flag=True)
-    @click.option("--sort-by", help="Sort playlist by userid.", type=str)
-    def build(id: int | None, name: str | None, list_builded: bool, sort_by: str | None):
-        """Build playlists by name."""
-        if list_builded:
-            dist_playlists = DIST_DIR.iterdir()
-            if sort_by is not None:
-                user_playlists = db.users.get(sort_by, User()).playlists
-                dist_playlists = sorted(dist_playlists, key=lambda fp: try_index(user_playlists, int(fp.stem)))
-            dist_playlists = [i for i in dist_playlists]
-            for fp in dist_playlists:
-                print(f"{fp.relative_to(BASE_DIR)} - {db.playlists[fp.stem]}")
-            return
-
+    @click.option("--fuzzy", help="Fuzzy search.", is_flag=True)
+    def playlist(id: int | None, name: str | None, fuzzy: bool):
+        """Build playlist."""
         if id is None and name is None:
             raise click.UsageError("id or name must be specified")
-        for fp, _ in search_playlist(id=id, name=name):
-            build_playlist(fp)
+        for playlist_id, _ in find_playlist(id=id, name=name, fuzzy=fuzzy):
+            build_playlist(playlist_id)
+
+    @build.command()
+    @click.option("--id", help="Music id to search for and build.", type=int)
+    @click.option("--name", help="Music name to search for and build.")
+    @click.option("--dirname", help="Directory name to build.")
+    @click.option("--fuzzy", help="Fuzzy search.", is_flag=True)
+    def music(id: int | None, name: str | None, fuzzy: bool, dirname: str | None):
+        """Build music."""
+        if id is None and name is None:
+            raise click.UsageError("id or name must be specified")
+        build_musics(
+            [db.musics[str(i)] for i, _ in find_music(id=id, name=name, fuzzy=fuzzy)], dirname or id or name or "_"
+        )
 
 
 def user():
@@ -153,7 +177,7 @@ def azuracast():
         """Sync playlist to azuracast."""
         playlist = db.playlists[playlist_id]
 
-        sftp = connect_azura_sftp(host, port, username, getpass())
+        sftp = connect_azura_sftp(host, port, username, getpass() or None)
 
         filenames = set(sftp.listdir())
         if playlist.name not in filenames:
@@ -184,4 +208,5 @@ def azuracast():
 music()
 playlist()
 user()
+build()
 azuracast()

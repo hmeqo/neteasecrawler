@@ -10,7 +10,7 @@ def get_current_user():
             return user
 
 
-def connect_azura_sftp(host: str, port: int, username: str, password: str):
+def connect_azura_sftp(host: str, port: int, username: str, password: str | None):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, port=port, username=username, password=password)
